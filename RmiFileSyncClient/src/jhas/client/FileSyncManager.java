@@ -1,31 +1,33 @@
 package jhas.client;
 
 import java.io.File;
-import java.io.FileFilter;
 import java.io.IOException;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
 import jhas.client.executors.DownloadExecutor;
 import jhas.client.executors.UploadExecutor;
 import jhas.common.Constants;
+import jhas.common.FileDto;
 import jhas.common.FileSync;
 
 public class FileSyncManager implements Runnable{
-	private File localDir;
-	private File serverDir;
+	private List<FileDto> localDir;
+	private String localDirPath;
+	private List<FileDto> serverDirFiles;
 	private FileSync fileSync;
-	private List<File> toUpload;
-	private List<File> toDownload;
+	private List<FileDto> toUpload;
+	private List<FileDto> toDownload;
 	private ExecutorService executor;
 	
 	public FileSyncManager(File localDir, ExecutorService executor) {
-		this.localDir = localDir;
+		this.localDir = toFileDtoList(localDir);
+		localDirPath = localDir.getPath();
 		this.executor = executor;
 		toUpload = new ArrayList<>();
 		toDownload = new ArrayList<>();
@@ -37,19 +39,31 @@ public class FileSyncManager implements Runnable{
 		}
 	}
 	
+	private List<FileDto> toFileDtoList(File localDir) {
+		if(localDir.isDirectory()){
+			List<FileDto> dtos = new ArrayList<>();
+			for(File file : localDir.listFiles()){
+				if(file.isFile()){
+					dtos.add(new FileDto(file.getName(), new Date(file.lastModified()), file.getPath()));
+				}
+			}
+			return dtos;
+		}
+		return null;
+	}
+
 	public void calculateDifferences(){
 		try{
-			if(localDir.isDirectory()){
-				String dirName = localDir.getName();
-				serverDir = fileSync.getDirectoryDescription(dirName);
-				if(serverDir.exists() && serverDir.isDirectory()){
+			if(localDir != null){
+				serverDirFiles = fileSync.getDirectoryDescription(new File(localDirPath).getName());
+				if(serverDirFiles != null){
 					findFilesExistingOnServerButNotOnLocal();
 					findFilesExistingOnBothButClientUpToDate();
 					findFilesExistingOnBothButServerUpToDate();
 				}
 				findFilesExistingOnLocalButNotOnServer();
 			}else{
-				throw new RuntimeException(localDir.getAbsolutePath() + "is not a directory");
+				throw new RuntimeException(localDirPath + "is not a directory");
 			}
 		}catch(IOException e){
 			throw new RuntimeException(e.getMessage());
@@ -57,11 +71,11 @@ public class FileSyncManager implements Runnable{
 	}
 
 	private void findFilesExistingOnBothButServerUpToDate() {
-		for(File serverFile : serverDir.listFiles()){
-			if(existFileName(serverFile.getName(), localDir.listFiles())){
-				File localFile = findFileByName(serverFile.getName(), localDir.listFiles());
-				Long serverFileLastMod = serverFile.lastModified();
-				Long localFileLastMod = localFile.lastModified();
+		for(FileDto serverFile : serverDirFiles){
+			if(existFileName(serverFile.getName(), localDir)){
+				FileDto localFile = findFileByName(serverFile.getName(), localDir);
+				Date serverFileLastMod = serverFile.getLastModificationDate();
+				Date localFileLastMod = localFile.getLastModificationDate();
 				if(serverFileLastMod.compareTo(localFileLastMod) > 0){
 					toDownload.add(localFile);
 				}
@@ -70,11 +84,11 @@ public class FileSyncManager implements Runnable{
 	}
 
 	private void findFilesExistingOnBothButClientUpToDate() {
-		for(File localFile : localDir.listFiles()){
-			if(!localFile.isDirectory() && existFileName(localFile.getName(), serverDir.listFiles())){
-				File serverFile = findFileByName(localFile.getName(), serverDir.listFiles());
-				Long localFileLastMod = localFile.lastModified();
-				Long serverFileLastMod = serverFile.lastModified();
+		for(FileDto localFile : localDir){
+			if(existFileName(localFile.getName(), serverDirFiles)){
+				FileDto serverFile = findFileByName(localFile.getName(), serverDirFiles);
+				Date localFileLastMod = localFile.getLastModificationDate();
+				Date serverFileLastMod = serverFile.getLastModificationDate();
 				if(localFileLastMod.compareTo(serverFileLastMod) > 0){
 					toUpload.add(localFile);
 				}
@@ -82,8 +96,8 @@ public class FileSyncManager implements Runnable{
 		}
 	}
 
-	private File findFileByName(String fileName, File[]fileList){
-		for(File file : fileList){
+	private FileDto findFileByName(String fileName,List<FileDto> fileList){
+		for(FileDto file : fileList){
 			if(file.getName().equals(fileName)){
 				return file;
 			}
@@ -91,32 +105,28 @@ public class FileSyncManager implements Runnable{
 		return null;
 	}
 	private void findFilesExistingOnLocalButNotOnServer() {
-		if(serverDir.exists()){
-			for(File file : localDir.listFiles()){
-				if(!file.isDirectory() && !existFileName(file.getName(), serverDir.listFiles())){
-					toUpload.add(file);
+		if(serverDirFiles != null){
+			for(FileDto file : localDir){
+				if(!existFileName(file.getName(), serverDirFiles)){
+					toUpload.add(findFileByName(file.getName(), localDir));
 				}
 			}
 		}else{
-			toUpload.addAll(Arrays.asList(localDir.listFiles(new FileFilter() {
-				@Override
-				public boolean accept(File pathname) {
-					return !pathname.isDirectory();
-				}
-			})));
+			toUpload.addAll(localDir);
 		}
 	}
 
 	private void findFilesExistingOnServerButNotOnLocal() {
-		for(File file : serverDir.listFiles()){
-			if(!existFileName(file.getName(), localDir.listFiles())){
-				toDownload.add(new File(localDir, file.getName()));
+		for(FileDto fileDto : serverDirFiles){
+			if(!existFileName(fileDto.getName(), localDir)){
+				toDownload.add(new FileDto(fileDto.getName(), fileDto.getLastModificationDate(), 
+						new File(localDirPath, fileDto.getName()).getPath()));
 			}
 		}
 	}
 
-	private boolean existFileName(String fileName, File[] fileList){
-		for(File file : fileList){
+	private boolean existFileName(String fileName, List<FileDto> fileList){
+		for(FileDto file : fileList){
 			if(file.getName().equals(fileName)){
 				return true;
 			}

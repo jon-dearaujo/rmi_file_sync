@@ -8,8 +8,12 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 
 import jhas.common.Constants;
+import jhas.common.FileDto;
 import jhas.common.FileSync;
 
 public class FileSyncImpl extends UnicastRemoteObject implements FileSync {
@@ -20,14 +24,13 @@ public class FileSyncImpl extends UnicastRemoteObject implements FileSync {
 	}
 
 	@Override
-	public byte[] download(File file) throws RemoteException{
-		Path parentPath = file.toPath().getParent().getFileName();
-		File serverFile = new File(Constants.SYNC_FOLDER + parentPath, file.getName());
+	public byte[] download(FileDto fileDto) throws RemoteException{
+		File serverFile = new File(Constants.SYNC_FOLDER + fileDto.getParentName(), fileDto.getName());
 		byte[] fileBytes = null;
 		if(Files.exists(serverFile.toPath())){
 			try {
 				fileBytes = Files.readAllBytes(serverFile.toPath());
-				System.out.printf("%s downloaded\n", serverFile.getName());
+				System.out.printf("%s downloaded - %s\n", serverFile.getName(), new Date());
 			} catch (IOException e) {
 				e.printStackTrace();
 				throw new RemoteException(e.getMessage());
@@ -37,10 +40,8 @@ public class FileSyncImpl extends UnicastRemoteObject implements FileSync {
 	}
 
 	@Override
-	public void update(byte[] fileBytes, File file) throws RemoteException{
-		
-		Path parentPath = file.toPath().getParent().getFileName();
-		File serverFile = new File(Constants.SYNC_FOLDER + parentPath, file.getName());
+	public void update(byte[] fileBytes, FileDto fileDto) throws RemoteException{
+		File serverFile = new File(Constants.SYNC_FOLDER + fileDto.getParentName(), fileDto.getName());
 		File backup = null;
 		try{
 			if(!Files.exists(serverFile.toPath().getParent())){
@@ -50,7 +51,7 @@ public class FileSyncImpl extends UnicastRemoteObject implements FileSync {
 				backup = createFileBackup(serverFile);
 			}
 			Files.write(serverFile.toPath(), fileBytes);
-			System.out.printf("%s uploaded\n", serverFile.getName());
+			System.out.printf("%s uploaded - %s\n", serverFile.getName(), new Date());
 		}catch(IOException e){
 			e.printStackTrace();
 			if(backup != null){
@@ -88,7 +89,18 @@ public class FileSyncImpl extends UnicastRemoteObject implements FileSync {
 	}
 
 	@Override
-	public File getDirectoryDescription(String dirPath) throws RemoteException{
-		return new File(Constants.SYNC_FOLDER + dirPath);
+	public List<FileDto> getDirectoryDescription(String dirPath) throws RemoteException{
+		File dir = new File(Constants.SYNC_FOLDER + dirPath);
+		if(dir.exists() && dir.isDirectory()){
+			List<FileDto> dtos = new ArrayList<>();
+			for(File file : dir.listFiles()){
+				if( file.isFile()){
+					FileDto dto = new FileDto(file.getName(), new Date(file.lastModified()), file.getPath());
+					dtos.add(dto);
+				}
+			}
+			return dtos;
+		}
+		return null;
 	}
 }
