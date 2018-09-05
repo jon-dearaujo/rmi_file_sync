@@ -1,11 +1,13 @@
 rmi_file_sync
 =============
 
-java projects that download and upload files between herself using java rmi. The purpose is synchronize both file folders.
+College - Distributed systems class project
+
+java project that downloads and uploads files using java rmi technology. The purpose is to synchronize file folders in the network.
 
 Java involved thecnologies:
 -Threads
 -RMI
 -Swing*
 
-*The GUI isn't created. All system is running on console.
+*The GUI isn't created. The whole system is running on console.
